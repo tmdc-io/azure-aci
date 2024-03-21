@@ -23,22 +23,50 @@ TEST_CREDENTIALS_JSON ?= $(TEST_CREDENTIALS_DIR)/credentials.json
 TEST_LOGANALYTICS_JSON ?= $(TEST_CREDENTIALS_DIR)/loganalytics.json
 export TEST_CREDENTIALS_JSON TEST_LOGANALYTICS_JSON TEST_AKS_CREDENTIALS_JSON
 
-VERSION ?= v1.6.1
+VERSION ?= v1.6.2-d4
 REGISTRY ?= ghcr.io
 IMG_NAME ?= virtual-kubelet
-INIT_IMG_NAME ?= init-validation
 IMAGE ?= $(REGISTRY)/$(IMG_NAME)
-INIT_IMAGE ?= $(REGISTRY)/$(INIT_IMG_NAME)
 LOCATION := $(E2E_REGION)
 E2E_CLUSTER_NAME := $(CLUSTER_NAME)
 
 OUTPUT_TYPE ?= type=docker
 BUILDPLATFORM ?= linux/amd64
 IMG_TAG ?= $(subst v,,$(VERSION))
-INIT_IMG_TAG ?= 0.2.0
 
 BUILD_DATE ?= $(shell date '+%Y-%m-%dT%H:%M:%S')
 VERSION_FLAGS := "-ldflags=-X main.buildVersion=$(IMG_TAG) -X main.buildTime=$(BUILD_DATE)"
+
+BINDIR         := $(CURDIR)/bin
+BINNAME        ?= virtual-kubelet
+
+.PHONY: all
+all: build
+
+## --------------------------------------
+## Build
+## --------------------------------------
+
+build: clean mod vet fmt compile
+
+.PHONY: compile
+compile: $(BINDIR)/$(BINNAME)
+
+$(BINDIR)/$(BINNAME):
+	@echo
+	@echo "=== running compile ==="
+	GO111MODULE=on CGO_ENABLED=0 go build $(GOFLAGS) -tags '$(TAGS)' -ldflags '$(LDFLAGS)' -o $(BINDIR)/$(BINNAME) cmd/virtual-kubelet/*
+
+
+.PHONY: dataos-docker-build-image
+dataos-docker-build-image:
+	docker buildx build \
+		--file docker/virtual-kubelet/Dockerfile \
+		--build-arg VERSION_FLAGS=$(VERSION_FLAGS) \
+		--output=$(OUTPUT_TYPE) \
+		--platform="$(BUILDPLATFORM)" \
+		--pull \
+		--tag rubiklabs/$(IMG_NAME):$(IMG_TAG) .
 
 ## --------------------------------------
 ## Tooling Binaries
@@ -72,15 +100,6 @@ docker-build-image: docker-buildx-builder
 		--pull \
 		--tag $(IMAGE):$(IMG_TAG) .
 
-.PHONY: docker-build-init-image
-docker-build-init-image: docker-buildx-builder
-	docker buildx build \
-		--file docker/init-container/Dockerfile \
-		--output=$(OUTPUT_TYPE) \
-		--platform="$(BUILDPLATFORM)" \
-		--pull \
-		--tag $(INIT_IMAGE):$(INIT_IMG_TAG) .
-
 .PHONY: clean
 clean: files := bin/virtual-kubelet bin/virtual-kubelet.tgz
 clean:
@@ -103,7 +122,7 @@ unit-tests: testauth
 e2e-test:
 	PR_RAND=$(PR_COMMIT_SHA) E2E_TARGET=$(E2E_TARGET) \
  	IMG_URL=$(REGISTRY) IMG_REPO=$(IMG_NAME) IMG_TAG=$(IMG_TAG) \
- 	INIT_IMG_REPO=$(INIT_IMG_NAME) INIT_IMG_TAG=$(INIT_IMG_TAG) \
+ 	INIT_IMG_REPO=$(IMG_NAME) INIT_IMG_TAG=$(IMG_TAG) \
  	LOCATION=$(LOCATION) RESOURCE_GROUP=$(E2E_CLUSTER_NAME) \
  	$(AKS_E2E_SCRIPT) go test -timeout 90m -v ./e2e
 
@@ -111,7 +130,7 @@ e2e-test:
 aks-addon-e2e-test:
 	PR_RAND=$(PR_COMMIT_SHA) E2E_TARGET=$(E2E_TARGET) \
 	IMG_URL=$(REGISTRY) IMG_REPO=$(IMG_NAME) IMG_TAG=$(IMG_TAG) \
-	INIT_IMG_REPO=$(INIT_IMG_NAME) INIT_IMG_TAG=$(INIT_IMG_TAG) \
+	INIT_IMG_REPO=$(IMG_NAME) INIT_IMG_TAG=$(IMG_TAG) \
 	LOCATION=$(LOCATION) RESOURCE_GROUP=$(E2E_CLUSTER_NAME) \
 	$(AKS_ADDON_E2E_SCRIPT) go test -timeout 90m -v ./e2e
 

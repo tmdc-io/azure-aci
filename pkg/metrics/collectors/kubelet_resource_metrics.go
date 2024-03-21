@@ -6,9 +6,10 @@ Licensed under the Apache 2.0 license.
 package collectors
 
 import (
+	"time"
+
 	stats "github.com/virtual-kubelet/virtual-kubelet/node/api/statsv1alpha1"
 	compbasemetrics "k8s.io/component-base/metrics"
-	"time"
 )
 
 // defining metrics

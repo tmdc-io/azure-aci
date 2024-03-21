@@ -135,9 +135,31 @@ func (p *ACIProvider) getVolumes(ctx context.Context, pod *v1.Pod) ([]*azaciv2.V
 				continue
 			}
 
-			for k, v := range secret.Data {
-				strV := base64.StdEncoding.EncodeToString(v)
-				paths[k] = &strV
+			if podVolumes[i].Secret.Items != nil && len(podVolumes[i].Secret.Items) > 0 {
+				for _, keyToPath := range podVolumes[i].Secret.Items {
+					for k, v := range secret.StringData {
+						if keyToPath.Key == k {
+							data, err := base64.StdEncoding.DecodeString(v)
+							if err != nil {
+								return nil, err
+							}
+							dataStr := string(data)
+							paths[k] = &dataStr
+						}
+					}
+
+					for k, v := range secret.Data {
+						if keyToPath.Key == k {
+							strV := base64.StdEncoding.EncodeToString(v)
+							paths[k] = &strV
+						}
+					}
+				}
+			} else {
+				for k, v := range secret.Data {
+					strV := base64.StdEncoding.EncodeToString(v)
+					paths[k] = &strV
+				}
 			}
 
 			if len(paths) != 0 {
@@ -146,6 +168,7 @@ func (p *ACIProvider) getVolumes(ctx context.Context, pod *v1.Pod) ([]*azaciv2.V
 					Secret: paths,
 				})
 			}
+
 			continue
 		}
 
@@ -160,13 +183,30 @@ func (p *ACIProvider) getVolumes(ctx context.Context, pod *v1.Pod) ([]*azaciv2.V
 				continue
 			}
 
-			for k, v := range configMap.Data {
-				strV := base64.StdEncoding.EncodeToString([]byte(v))
-				paths[k] = &strV
-			}
-			for k, v := range configMap.BinaryData {
-				strV := base64.StdEncoding.EncodeToString(v)
-				paths[k] = &strV
+			if podVolumes[i].ConfigMap.Items != nil && len(podVolumes[i].ConfigMap.Items) > 0 {
+				for _, keyToPath := range podVolumes[i].ConfigMap.Items {
+					for k, v := range configMap.Data {
+						if keyToPath.Key == k {
+							strV := base64.StdEncoding.EncodeToString([]byte(v))
+							paths[k] = &strV
+						}
+					}
+					for k, v := range configMap.BinaryData {
+						if keyToPath.Key == k {
+							strV := base64.StdEncoding.EncodeToString(v)
+							paths[k] = &strV
+						}
+					}
+				}
+			} else {
+				for k, v := range configMap.Data {
+					strV := base64.StdEncoding.EncodeToString([]byte(v))
+					paths[k] = &strV
+				}
+				for k, v := range configMap.BinaryData {
+					strV := base64.StdEncoding.EncodeToString(v)
+					paths[k] = &strV
+				}
 			}
 
 			if len(paths) != 0 {
@@ -226,26 +266,33 @@ func (p *ACIProvider) getVolumes(ctx context.Context, pod *v1.Pod) ([]*azaciv2.V
 						continue
 					}
 
-					for _, keyToPath := range source.Secret.Items {
-						for k, v := range secret.StringData {
-							if keyToPath.Key == k {
-								data, err := base64.StdEncoding.DecodeString(v)
-								if err != nil {
-									return nil, err
+					if source.Secret.Items != nil && len(source.Secret.Items) > 0 {
+						for _, keyToPath := range source.Secret.Items {
+							for k, v := range secret.StringData {
+								if keyToPath.Key == k {
+									data, err := base64.StdEncoding.DecodeString(v)
+									if err != nil {
+										return nil, err
+									}
+									dataStr := string(data)
+									paths[k] = &dataStr
 								}
-								dataStr := string(data)
-								paths[k] = &dataStr
+							}
+
+							for k, v := range secret.Data {
+								if keyToPath.Key == k {
+									strV := base64.StdEncoding.EncodeToString(v)
+									paths[k] = &strV
+								}
 							}
 						}
-
+					} else {
+						//all items
 						for k, v := range secret.Data {
-							if keyToPath.Key == k {
-								strV := base64.StdEncoding.EncodeToString(v)
-								paths[k] = &strV
-							}
+							strV := base64.StdEncoding.EncodeToString(v)
+							paths[k] = &strV
 						}
 					}
-
 				case source.ConfigMap != nil:
 					configMap, err := p.configL.ConfigMaps(pod.Namespace).Get(source.ConfigMap.Name)
 					if source.ConfigMap.Optional != nil && !*source.ConfigMap.Optional && k8serr.IsNotFound(err) {
@@ -255,18 +302,30 @@ func (p *ACIProvider) getVolumes(ctx context.Context, pod *v1.Pod) ([]*azaciv2.V
 						continue
 					}
 
-					for _, keyToPath := range source.ConfigMap.Items {
-						for k, v := range configMap.Data {
-							if keyToPath.Key == k {
-								strV := base64.StdEncoding.EncodeToString([]byte(v))
-								paths[k] = &strV
+					if source.ConfigMap.Items != nil && len(source.ConfigMap.Items) > 0 {
+						for _, keyToPath := range source.ConfigMap.Items {
+							for k, v := range configMap.Data {
+								if keyToPath.Key == k {
+									strV := base64.StdEncoding.EncodeToString([]byte(v))
+									paths[k] = &strV
+								}
+							}
+							for k, v := range configMap.BinaryData {
+								if keyToPath.Key == k {
+									strV := base64.StdEncoding.EncodeToString(v)
+									paths[k] = &strV
+								}
 							}
 						}
+					} else {
+						//all items
+						for k, v := range configMap.Data {
+							strV := base64.StdEncoding.EncodeToString([]byte(v))
+							paths[k] = &strV
+						}
 						for k, v := range configMap.BinaryData {
-							if keyToPath.Key == k {
-								strV := base64.StdEncoding.EncodeToString(v)
-								paths[k] = &strV
-							}
+							strV := base64.StdEncoding.EncodeToString(v)
+							paths[k] = &strV
 						}
 					}
 				}

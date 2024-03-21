@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path"
 	"reflect"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	azaciv2 "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/containerinstance/armcontainerinstance/v2"
+	"github.com/cpuguy83/dockercfg"
 	"github.com/gorilla/websocket"
 	"github.com/pkg/errors"
 	"github.com/virtual-kubelet/azure-aci/pkg/analytics"
@@ -36,12 +38,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	corev1listers "k8s.io/client-go/listers/core/v1"
-
-	"github.com/cpuguy83/dockercfg"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
+	corev1listers "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/tools/reference"
 )
@@ -900,9 +900,13 @@ func (p *ACIProvider) PortForward(ctx context.Context, namespace, pod string, po
 }
 
 func (p *ACIProvider) getImagePullSecrets(pod *v1.Pod) ([]*azaciv2.ImageRegistryCredential, error) {
-	ips := make([]*azaciv2.ImageRegistryCredential, 0, len(pod.Spec.ImagePullSecrets))
+	uniqueImagePullSecretNames := map[string]struct{}{}
 	for _, ref := range pod.Spec.ImagePullSecrets {
-		secret, err := p.secretL.Secrets(pod.Namespace).Get(ref.Name)
+		uniqueImagePullSecretNames[ref.Name] = struct{}{}
+	}
+	ips := make([]*azaciv2.ImageRegistryCredential, 0, len(uniqueImagePullSecretNames))
+	for name, _ := range uniqueImagePullSecretNames {
+		secret, err := p.secretL.Secrets(pod.Namespace).Get(name)
 		if err != nil {
 			return ips, err
 		}
@@ -929,6 +933,15 @@ func (p *ACIProvider) getImagePullSecrets(pod *v1.Pod) ([]*azaciv2.ImageRegistry
 func makeRegistryCredential(server string, authConfig AuthConfig) (*azaciv2.ImageRegistryCredential, error) {
 	username := authConfig.Username
 	password := authConfig.Password
+
+	if isURL(server) {
+		parsedURL, err := url.Parse(server)
+		if err != nil {
+			return nil, err
+		}
+		// Get the hostname
+		server = parsedURL.Hostname()
+	}
 
 	if username == "" {
 		if authConfig.Auth == "" {
@@ -958,6 +971,14 @@ func makeRegistryCredential(server string, authConfig AuthConfig) (*azaciv2.Imag
 	return &cred, nil
 }
 
+func isURL(s string) bool {
+	parsedURL, err := url.Parse(s)
+	if err != nil {
+		return false
+	}
+	return parsedURL.IsAbs()
+}
+
 func makeRegistryCredentialFromDockerConfig(server string, configEntry dockercfg.AuthConfig) (*azaciv2.ImageRegistryCredential, error) {
 	if configEntry.Username == "" {
 		return nil, fmt.Errorf("no username present in auth config for server: %s", server)
@@ -965,6 +986,16 @@ func makeRegistryCredentialFromDockerConfig(server string, configEntry dockercfg
 
 	username := configEntry.Username
 	password := configEntry.Password
+
+	if isURL(server) {
+		parsedURL, err := url.Parse(server)
+		if err != nil {
+			return nil, err
+		}
+		// Get the hostname
+		server = parsedURL.Hostname()
+	}
+
 	if configEntry.Auth != "" {
 		var err error
 		username, password, err = dockercfg.DecodeBase64Auth(configEntry)
