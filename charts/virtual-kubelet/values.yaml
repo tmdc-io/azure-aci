@@ -15,7 +15,6 @@ namespace: vk-azure-aci
 
 nodeName: "virtual-node-aci-linux-helm"
 nodeOsType: "Linux"
-monitoredNamespace: ""
 apiserverCert:
 apiserverKey:
 logLevel:

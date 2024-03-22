@@ -1,15 +1,16 @@
+{{- $name := .Values.name }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   namespace: {{ .Values.namespace }}
-  name: {{ template "vk.fullname" . }}
+  name: {{ .Values.name }}
 {{ include "vk.labels" . | indent 2 }}
     component: kubelet
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: {{ template "vk.name" . }}
+      app: {{ .Values.name }}
   template:
     metadata:
 {{ include "vk.labels" . | indent 6 }}
@@ -17,10 +18,18 @@ spec:
       annotations:
         checksum/secret: {{ include (print $.Template.BasePath "/secrets.yaml") . | sha256sum }}
     spec:
+      {{ if .Values.imagePullSecret }}
+      imagePullSecrets:
+      - name: {{ .Values.imagePullSecret }}
+      {{- end }}
       initContainers:
         - name: init-validation
           image: "{{ .Values.initImage.repository }}/{{ .Values.initImage.name }}:{{ .Values.initImage.initTag }}"
           imagePullPolicy: {{ .Values.initImage.pullPolicy }}
+          command:
+          - virtual-kubelet
+          args:
+          - init
           env:
           - name: KUBELET_PORT
             value: "10250"
@@ -57,7 +66,7 @@ spec:
           - name: AZURE_CLIENT_SECRET
             valueFrom:
               secretKeyRef:
-                name: {{ template "vk.fullname" $ }}
+                name: {{ $name }}
                 key: clientSecret
           - name: ACI_RESOURCE_GROUP
             value: {{ .aciResourceGroup }}
@@ -108,7 +117,7 @@ spec:
             mountPath: "/etc/aks/azure.json"
             {{- end }}
       containers:
-      - name: {{ template "vk.fullname" . }}
+      - name: {{ .Values.name }}
         image: "{{ .Values.image.repository }}/{{ .Values.image.name }}:{{ .Values.image.tag }}"
         imagePullPolicy: {{ .Values.image.pullPolicy }}
         env:
@@ -152,7 +161,7 @@ spec:
         - name: AZURE_CLIENT_SECRET
           valueFrom:
             secretKeyRef:
-              name: {{ template "vk.fullname" $ }}
+              name: {{ $name }}
               key: clientSecret
         - name: ACI_RESOURCE_GROUP
           value: {{ .aciResourceGroup }}
@@ -209,13 +218,13 @@ spec:
           mountPath: "/etc/aks/azure.json"
 {{- end }}
 {{- end }}
-        command: ["virtual-kubelet"]
+        command:
+        - virtual-kubelet
         args: [
 {{- if not .Values.taint.enabled }}
           "--disable-taint", "true",
 {{- end }}
           "--provider", "{{ required "You must specify a Virtual Kubelet provider" .Values.provider }}",
-          "--namespace", "{{ .Values.monitoredNamespace }}",
           "--nodename", "{{ required "nodeName is required" .Values.nodeName }}",
 {{- if .Values.logLevel }}
           "--log-level", "{{.Values.logLevel}}",
@@ -240,10 +249,14 @@ spec:
       volumes:
       - name: credentials
         secret:
-          secretName: {{ template "vk.fullname" . }}
+          secretName: {{ .Values.name }}
       - name: certificates
         hostPath:
+          {{- if .Values.certificateHostPath }}
+          path: {{ .Values.certificateHostPath }}
+          {{- else }}
           path: /etc/kubernetes/certs
+          {{- end }}
 {{- if eq (required "You must specify a Virtual Kubelet provider" .Values.provider) "azure" }}
 {{- if .Values.providers.azure.targetAKS }}
       - name: aks-credential
@@ -252,6 +265,8 @@ spec:
           type: File
 {{- end }}
 {{- end }}
-      serviceAccountName: {{ if .Values.rbac.install }} "{{ template "vk.fullname" . }}-{{ .Values.rbac.serviceAccountName }}" {{ end }}
+      {{ if .Values.rbac.install }}
+      serviceAccountName: {{ .Values.rbac.serviceAccountName }}
+      {{ end }}
       nodeSelector:
-        beta.kubernetes.io/os: linux
+        kubernetes.io/os: linux
